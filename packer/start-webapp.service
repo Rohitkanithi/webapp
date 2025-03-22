@@ -3,8 +3,8 @@ Description=Start Webapp Service
 After=network.target
 
 [Service]
-User=csye6225
-Group=csye6225
+User=webappuser
+Group=webappuser
 Type=simple
 EnvironmentFile=/opt/.env
 ExecStart=/usr/bin/java -jar /opt/webapp-1.0-SNAPSHOT.jar
