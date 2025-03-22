@@ -1,0 +1,38 @@
+name: Webapp Integration Testing
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  job1:
+    name: User Integration Testing
+    runs-on: ubuntu-latest
+    env:
+      DB_DATABASE: ${{secrets.DATABASE_NAME}}
+      DATABASE_USERNAME: ${{secrets.DATABASE_USERNAME}}
+      DATABASE_PASSWORD: ${{secrets.DATABASE_PASSWORD}}
+      DATABASE_URL: ${{secrets.DATABASE_URL}}
+      GOOGLE_PROJECT_ID: ${{secrets.GOOGLE_PROJECT_ID}}
+      PUB_SUB_TOPIC_ID: ${{secrets.PUB_SUB_TOPIC_ID}}
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Start MySQL
+        run: |
+          sudo /etc/init.d/mysql start
+          mysql -h localhost -e "CREATE DATABASE IF NOT EXISTS $DB_DATABASE;" -u$DATABASE_USERNAME -p$DATABASE_PASSWORD
+      - name: Log Directory
+        run: |
+          sudo chmod -R 733 /var/log
+      - name: Google Cloud Platform Credentials
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{secrets.CREDENTIALS_JSON}}'
+      - name: Run User Integration Tests
+        run: mvn test --file pom.xml

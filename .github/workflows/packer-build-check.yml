@@ -1,0 +1,110 @@
+name: Packer Build Workflow
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    types:
+      - closed
+
+jobs:
+  jobs1:
+    if: github.event.pull_request.merged == true
+    name: Packer Build
+    runs-on: ubuntu-latest
+    env:
+      DB_DATABASE: ${{secrets.DATABASE_NAME}}
+      DATABASE_USERNAME: ${{secrets.DATABASE_USERNAME}}
+      DATABASE_PASSWORD: ${{secrets.DATABASE_PASSWORD}}
+      DATABASE_URL: ${{secrets.DATABASE_URL}}
+      PKR_VAR_project_id: ${{secrets.PROJECT_ID}}
+      PKR_VAR_source_image_family: ${{secrets.SOURCE_IMAGE_FAMILY}}
+      PKR_VAR_custom_image_zone: ${{secrets.CUSTOM_IMAGE_ZONE}}
+      PKR_VAR_ssh_username: ${{secrets.SSH_USERNAME}}
+      PKR_VAR_custom_image_network: ${{secrets.CUSTOM_IMAGE_NETWORK}}
+      PKR_VAR_custom_image_name: ${{secrets.CUSTOM_IMAGE_NAME}}
+      PKR_VAR_custom_image_description: ${{secrets.CUSTOM_IMAGE_DESCRIPTION}}
+      PKR_VAR_service_account_email: ${{secrets.SERVICE_ACCOUNT_EMAIL}}
+      GOOGLE_PROJECT_ID: ${{secrets.GOOGLE_PROJECT_ID}}
+      PUB_SUB_TOPIC_ID: ${{secrets.PUB_SUB_TOPIC_ID}}
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Start MySQL
+        run: |
+          sudo /etc/init.d/mysql start
+      - name: Log Directory
+        run: |
+          sudo chmod -R 733 /var/log
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
+
+      - name: Google Cloud Platform Credentials
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{secrets.CREDENTIALS_JSON}}'
+
+      - name: Setup packer
+        uses: hashicorp/setup-packer@main
+
+      - name: Packer Init
+        working-directory: ./packer
+        run: "packer init ."
+
+      - name: Packer Build
+        working-directory: ./packer
+        run: "packer build ."
+
+      - name: Getting Image Name
+        working-directory: ./packer
+        run: |
+          COMPUTE_IMAGE_NAME=$(jq -r '.builds[-1].artifact_id' manifest.json | cut -d ":" -f2) && echo "COMPUTE_IMAGE_NAME=$COMPUTE_IMAGE_NAME" >> "$GITHUB_ENV"
+
+      - id: 'secrets'
+        uses: 'google-github-actions/get-secretmanager-secrets@v2'
+        with:
+          secrets: |-
+            DATABASE_URL:projects/217948701680/secrets/DATABASE_URL
+            DATABASE_PASSWORD:projects/217948701680/secrets/DATABASE_PASSWORD
+            DATABASE_USERNAME:projects/217948701680/secrets/DATABASE_USERNAME
+            KEY_MANAGEMENT_SYSTEM_KEY:projects/217948701680/secrets/KEY_MANAGEMENT_SYSTEM_KEY
+
+
+      - name: Random string generate
+        id: random-string
+        run: echo "RANDOM_SUFFIX=$(uuidgen | tr -d '-')" >> $GITHUB_ENV
+
+      - name: Create Instance Template
+        run: |
+          gcloud compute instance-templates create instance-template-${{env.RANDOM_SUFFIX}} \
+            --machine-type ${{vars.MACHINE_TYPE}} \
+            --instance-template-region=${{vars.INSTANCE_TEMPLATE_REGION}} \
+            --create-disk=image=${{vars.BASE_PATH_IMG}}/${{env.COMPUTE_IMAGE_NAME}},size=${{vars.DISK_SIZE}},type=${{vars.DISK_TYPE}},auto-delete=yes,boot=true,kms-key=${{steps.secrets.outputs.KEY_MANAGEMENT_SYSTEM_KEY}} \
+            --network=${{vars.VPC_NETWORK_PATH}} \
+            --subnet=${{vars.VPC_SUBNETWORK_PATH}} \
+            --metadata startup-script="echo 'DATABASE_URL=${{steps.secrets.outputs.DATABASE_URL}}' > .env && echo 'DATABASE_USERNAME=${{steps.secrets.outputs.DATABASE_USERNAME}}' >> .env && echo 'DATABASE_PASSWORD=${{steps.secrets.outputs.DATABASE_PASSWORD}}' >> .env && sudo mv .env /opt/ && sudo chown csye6225:csye6225 /opt/.env && sudo setenforce 0 && sudo systemctl daemon-reload && sudo systemctl restart start-webapp.service" \
+            --service-account=${{secrets.SERVICE_ACCOUNT_EMAIL_PACKER}} \
+            --tags=vm-instance
+
+      - name: Set Instance Template
+        run: |
+          gcloud compute instance-groups managed set-instance-template \
+            ${{vars.BASE_PATH_IGM}} \
+            --template=${{vars.BASE_PATH_INSTANCE_TEMPLATE}}-${{env.RANDOM_SUFFIX}}
+
+      - name: Apply instance template to the managed instance group
+        run: |
+          gcloud compute instance-groups managed rolling-action start-update ${{vars.BASE_PATH_IGM}} --type=${{vars.ROLLING_ACTION_UPDATE_TYPE}} \
+            --version=template=${{vars.BASE_PATH_INSTANCE_TEMPLATE}}-${{env.RANDOM_SUFFIX}}
+
+      - name: Verify version target reached
+        run: |
+          gcloud compute instance-groups managed wait-until ${{vars.BASE_PATH_IGM}} --version-target-reached
+
+      - name: Describe instance group
+        run: |
+          gcloud compute instance-groups managed describe ${{vars.BASE_PATH_IGM}}
