@@ -1,7 +1,7 @@
 package com.cloudnative.webapp.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.neu.csye6225.model.User;
+import com.cloudnative.webapp.model.User;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import io.restassured.response.ValidatableResponse;

@@ -4,7 +4,7 @@
     </appender>
 
     <appender name="fileAppender" class="ch.qos.logback.core.FileAppender">
-        <file>/var/log/webapp.log</file>
+        <file>logs/webapp.log</file>
         <append>true</append>
         <immediateFlush>true</immediateFlush>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">

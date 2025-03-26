@@ -1,5 +1,4 @@
 package com.cloudnative.webapp.exceptions;
-
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
